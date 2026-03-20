@@ -1,7 +1,8 @@
 "use client"
 
-import { useState, useMemo } from 'react'
-import { ChevronLeft, ChevronRight, Plus, Search } from 'lucide-react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
+import { ChevronLeft, ChevronRight, Plus, Search, Loader2 } from 'lucide-react'
+import { useLifeFlowStore } from '@/lib/store'
 
 interface Recipe {
   id: string
@@ -24,35 +25,39 @@ interface MealPlan {
 }
 
 interface ShoppingList {
-  [aisle: string]: Array<{ name: string; quantity: string; checked: boolean }>
+  [aisle: string]: Array<{ id: string; name: string; quantity: string; checked: boolean }>
 }
 
-const MEAL_TYPES = ['Petit-déjeuner', 'Déjeuner', 'Goûter', 'Dîner', 'Collation']
+const MEAL_TYPES = ['Petit-dejeuner', 'Dejeuner', 'Gouter', 'Diner', 'Collation']
 const DAYS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
+
+// API helper using password from store
+async function mealApi(method: 'GET' | 'POST', body?: Record<string, unknown>, queryParams?: string) {
+  const password = useLifeFlowStore.getState().password
+  const url = queryParams ? `/api/lifeflow?${queryParams}` : '/api/lifeflow'
+  const opts: RequestInit = {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      'x-app-password': password,
+    },
+  }
+  if (body) opts.body = JSON.stringify(body)
+  const res = await fetch(url, opts)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Request failed' }))
+    throw new Error(err.error || 'Request failed')
+  }
+  return res.json()
+}
 
 export function MealPlanView() {
   const [subView, setSubView] = useState<'recipes' | 'planner' | 'shopping'>('recipes')
-  const [recipes, setRecipes] = useState<Recipe[]>(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('lifeflow-recipes')
-      return stored ? JSON.parse(stored) : []
-    }
-    return []
-  })
-  const [mealPlan, setMealPlan] = useState<MealPlan>(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('lifeflow-mealplan')
-      return stored ? JSON.parse(stored) : {}
-    }
-    return {}
-  })
-  const [shoppingList, setShoppingList] = useState<ShoppingList>(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('lifeflow-shopping')
-      return stored ? JSON.parse(stored) : {}
-    }
-    return {}
-  })
+  const [recipes, setRecipes] = useState<Recipe[]>([])
+  const [mealPlan, setMealPlan] = useState<MealPlan>({})
+  const [shoppingList, setShoppingList] = useState<ShoppingList>({})
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
 
   // Recipe modal
   const [recipeModalOpen, setRecipeModalOpen] = useState(false)
@@ -70,36 +75,75 @@ export function MealPlanView() {
   const [selectRecipeModal, setSelectRecipeModal] = useState(false)
   const [currentMealSlot, setCurrentMealSlot] = useState<string | null>(null)
 
-  // Save to localStorage
-  const saveRecipes = (newRecipes: Recipe[]) => {
-    setRecipes(newRecipes)
-    localStorage.setItem('lifeflow-recipes', JSON.stringify(newRecipes))
-  }
+  // Load data from Supabase
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true)
+      const data = await mealApi('GET', undefined, 'type=mealplan')
+      setRecipes(data.recipes || [])
+      setMealPlan(data.mealPlan || {})
+      setShoppingList(data.shoppingList || {})
+    } catch (err) {
+      console.error('Failed to load meal plan data:', err)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
-  const saveMealPlan = (newPlan: MealPlan) => {
-    setMealPlan(newPlan)
-    localStorage.setItem('lifeflow-mealplan', JSON.stringify(newPlan))
-  }
-
-  const saveShoppingList = (newList: ShoppingList) => {
-    setShoppingList(newList)
-    localStorage.setItem('lifeflow-shopping', JSON.stringify(newList))
-  }
+  useEffect(() => {
+    loadData()
+  }, [loadData])
 
   // Recipe actions
-  const togglePin = (id: string) => {
-    const newRecipes = recipes.map(r => r.id === id ? { ...r, pinned: !r.pinned } : r)
-    saveRecipes(newRecipes)
+  const saveRecipe = async (recipe: Recipe, isNew: boolean) => {
+    setSaving(true)
+    try {
+      if (isNew) {
+        await mealApi('POST', { action: 'addRecipe', recipe })
+        setRecipes(prev => [recipe, ...prev])
+      } else {
+        await mealApi('POST', { action: 'updateRecipe', recipeId: recipe.id, data: recipe })
+        setRecipes(prev => prev.map(r => r.id === recipe.id ? recipe : r))
+      }
+    } catch (err) {
+      console.error('Failed to save recipe:', err)
+    } finally {
+      setSaving(false)
+    }
   }
 
-  const toggleArchive = (id: string) => {
-    const newRecipes = recipes.map(r => r.id === id ? { ...r, archived: !r.archived } : r)
-    saveRecipes(newRecipes)
+  const togglePin = async (id: string) => {
+    const recipe = recipes.find(r => r.id === id)
+    if (!recipe) return
+    const newPinned = !recipe.pinned
+    setRecipes(prev => prev.map(r => r.id === id ? { ...r, pinned: newPinned } : r))
+    try {
+      await mealApi('POST', { action: 'updateRecipe', recipeId: id, data: { pinned: newPinned } })
+    } catch (err) {
+      setRecipes(prev => prev.map(r => r.id === id ? { ...r, pinned: !newPinned } : r))
+    }
   }
 
-  const deleteRecipe = (id: string) => {
-    if (confirm('Supprimer cette recette ?')) {
-      saveRecipes(recipes.filter(r => r.id !== id))
+  const toggleArchive = async (id: string) => {
+    const recipe = recipes.find(r => r.id === id)
+    if (!recipe) return
+    const newArchived = !recipe.archived
+    setRecipes(prev => prev.map(r => r.id === id ? { ...r, archived: newArchived } : r))
+    try {
+      await mealApi('POST', { action: 'updateRecipe', recipeId: id, data: { archived: newArchived } })
+    } catch (err) {
+      setRecipes(prev => prev.map(r => r.id === id ? { ...r, archived: !newArchived } : r))
+    }
+  }
+
+  const deleteRecipe = async (id: string) => {
+    if (!confirm('Supprimer cette recette ?')) return
+    const oldRecipes = recipes
+    setRecipes(prev => prev.filter(r => r.id !== id))
+    try {
+      await mealApi('POST', { action: 'deleteRecipe', recipeId: id })
+    } catch (err) {
+      setRecipes(oldRecipes)
     }
   }
 
@@ -111,8 +155,8 @@ export function MealPlanView() {
       if (filterStatus === 'pinned') statusMatch = recipe.pinned
       if (filterStatus === 'archived') statusMatch = recipe.archived
 
-      let tagMatch = !filterTag || recipe.tags.includes(filterTag)
-      let searchMatch = recipe.name.toLowerCase().includes(searchQuery.toLowerCase())
+      const tagMatch = !filterTag || recipe.tags.includes(filterTag)
+      const searchMatch = recipe.name.toLowerCase().includes(searchQuery.toLowerCase())
 
       return statusMatch && tagMatch && searchMatch
     })
@@ -130,37 +174,56 @@ export function MealPlanView() {
     if (canGoNext) setCurrentWeekStart(Math.min(weekCount - displayWeeks, currentWeekStart + displayWeeks))
   }
 
-  const removeMeal = (slotKey: string) => {
-    const newPlan = { ...mealPlan }
-    delete newPlan[slotKey]
-    saveMealPlan(newPlan)
+  const removeMeal = async (slotKey: string) => {
+    const oldPlan = { ...mealPlan }
+    setMealPlan(prev => {
+      const newPlan = { ...prev }
+      delete newPlan[slotKey]
+      return newPlan
+    })
+    try {
+      await mealApi('POST', { action: 'removeMealSlot', slotKey })
+    } catch (err) {
+      setMealPlan(oldPlan)
+    }
   }
 
-  const assignRecipe = (recipeId: string) => {
+  const assignRecipe = async (recipeId: string) => {
     if (!currentMealSlot) return
     const recipe = recipes.find(r => r.id === recipeId)
     if (!recipe) return
 
-    saveMealPlan({
-      ...mealPlan,
-      [currentMealSlot]: {
-        recipeId: recipe.id,
-        name: recipe.name,
-        ingredients: recipe.ingredients
-      }
-    })
+    const mealData = {
+      recipeId: recipe.id,
+      name: recipe.name,
+      ingredients: recipe.ingredients
+    }
+
+    setMealPlan(prev => ({ ...prev, [currentMealSlot]: mealData }))
     setSelectRecipeModal(false)
+    
+    try {
+      await mealApi('POST', {
+        action: 'setMealSlot',
+        slotKey: currentMealSlot,
+        recipeId: recipe.id,
+        recipeName: recipe.name,
+        ingredients: recipe.ingredients
+      })
+    } catch (err) {
+      console.error('Failed to assign recipe:', err)
+    }
     setCurrentMealSlot(null)
   }
 
   // Generate shopping list
-  const generateShopping = () => {
-    const aisles: ShoppingList = {
-      'Fruits & Légumes': [],
+  const generateShopping = async () => {
+    const aisles: Record<string, Array<{ name: string; quantity: string }>> = {
+      'Fruits & Legumes': [],
       'Viande & Poisson': [],
       'Produits laitiers': [],
-      'Épicerie': [],
-      'Surgelés': [],
+      'Epicerie': [],
+      'Surgeles': [],
       'Boulangerie': [],
       'Divers': []
     }
@@ -192,31 +255,94 @@ export function MealPlanView() {
       let aisle = 'Divers'
       const key = ing.name.toLowerCase()
       
-      if (key.match(/tomate|laitue|carotte|oignon|poivron|courgette|pomme|banane|orange|citron|salade|épinard|chou/i)) {
-        aisle = 'Fruits & Légumes'
+      if (key.match(/tomate|laitue|carotte|oignon|poivron|courgette|pomme|banane|orange|citron|salade|epinard|chou/i)) {
+        aisle = 'Fruits & Legumes'
       } else if (key.match(/poulet|boeuf|bœuf|porc|poisson|saumon|thon|jambon|viande|steak/i)) {
         aisle = 'Viande & Poisson'
-      } else if (key.match(/lait|yaourt|fromage|beurre|crème|œuf|oeuf/i)) {
+      } else if (key.match(/lait|yaourt|fromage|beurre|creme|œuf|oeuf/i)) {
         aisle = 'Produits laitiers'
-      } else if (key.match(/pâtes|pates|riz|farine|sucre|huile|sel|poivre|épice|conserve/i)) {
-        aisle = 'Épicerie'
-      } else if (key.match(/surgelé|surgelés|glace|légume surgelé/i)) {
-        aisle = 'Surgelés'
+      } else if (key.match(/pates|pate|riz|farine|sucre|huile|sel|poivre|epice|conserve/i)) {
+        aisle = 'Epicerie'
+      } else if (key.match(/surgele|surgeles|glace|legume surgele/i)) {
+        aisle = 'Surgeles'
       } else if (key.match(/pain|baguette|croissant|brioche/i)) {
         aisle = 'Boulangerie'
       }
 
-      aisles[aisle].push({ ...ing, checked: false })
+      aisles[aisle].push(ing)
     })
 
-    saveShoppingList(aisles)
-    setSubView('shopping')
+    // Convert to shopping items with IDs
+    const items: Array<{ id: string; aisle: string; name: string; quantity: string; checked: boolean }> = []
+    Object.entries(aisles).forEach(([aisle, ingList]) => {
+      ingList.forEach(ing => {
+        items.push({
+          id: `si-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          aisle,
+          name: ing.name,
+          quantity: ing.quantity,
+          checked: false
+        })
+      })
+    })
+
+    // Save to Supabase
+    try {
+      await mealApi('POST', { action: 'setShoppingList', items })
+      // Update local state
+      const grouped: ShoppingList = {}
+      items.forEach(item => {
+        if (!grouped[item.aisle]) grouped[item.aisle] = []
+        grouped[item.aisle].push(item)
+      })
+      setShoppingList(grouped)
+      setSubView('shopping')
+    } catch (err) {
+      console.error('Failed to generate shopping list:', err)
+    }
   }
 
-  const toggleIngredient = (aisle: string, index: number) => {
-    const newList = { ...shoppingList }
-    newList[aisle][index].checked = !newList[aisle][index].checked
-    saveShoppingList(newList)
+  const toggleIngredient = async (aisle: string, index: number) => {
+    const item = shoppingList[aisle]?.[index]
+    if (!item) return
+
+    const newChecked = !item.checked
+    setShoppingList(prev => {
+      const newList = { ...prev }
+      newList[aisle] = [...newList[aisle]]
+      newList[aisle][index] = { ...newList[aisle][index], checked: newChecked }
+      return newList
+    })
+
+    try {
+      await mealApi('POST', { action: 'toggleShoppingItem', itemId: item.id, checked: newChecked })
+    } catch (err) {
+      setShoppingList(prev => {
+        const newList = { ...prev }
+        newList[aisle] = [...newList[aisle]]
+        newList[aisle][index] = { ...newList[aisle][index], checked: !newChecked }
+        return newList
+      })
+    }
+  }
+
+  const clearShoppingList = async () => {
+    if (!confirm('Reinitialiser la liste ?')) return
+    const oldList = shoppingList
+    setShoppingList({})
+    try {
+      await mealApi('POST', { action: 'clearShoppingList' })
+    } catch (err) {
+      setShoppingList(oldList)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--lf-text-2)' }} />
+      </div>
+    )
   }
 
   return (
@@ -275,7 +401,7 @@ export function MealPlanView() {
         <div>
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-[22px] font-bold font-serif" style={{ color: 'var(--lf-text-1)' }}>
-              Bibliothèque de recettes
+              Bibliotheque de recettes
             </h2>
             <button
               onClick={() => { setEditingRecipeId(null); setRecipeModalOpen(true) }}
@@ -297,8 +423,8 @@ export function MealPlanView() {
             >
               <option value="all">Toutes</option>
               <option value="active">Actives</option>
-              <option value="pinned">Épinglées</option>
-              <option value="archived">Archivées</option>
+              <option value="pinned">Epinglees</option>
+              <option value="archived">Archivees</option>
             </select>
 
             <select
@@ -308,7 +434,7 @@ export function MealPlanView() {
               style={{ background: 'var(--lf-surface)', border: '1px solid var(--lf-border)', color: 'var(--lf-text-1)' }}
             >
               <option value="">Tous les tags</option>
-              <option value="végé">Végétarien</option>
+              <option value="vege">Vegetarien</option>
               <option value="rapide">Rapide</option>
               <option value="italien">Italien</option>
               <option value="asiatique">Asiatique</option>
@@ -337,7 +463,7 @@ export function MealPlanView() {
                 style={{ background: 'var(--lf-surface)', border: '2px solid var(--lf-border)', boxShadow: 'var(--lf-shadow)' }}
               >
                 {recipe.image ? (
-                  <img src={recipe.image} alt={recipe.name} className="w-full h-48 object-cover" />
+                  <img src={recipe.image} alt={recipe.name} className="w-full h-48 object-cover" crossOrigin="anonymous" />
                 ) : (
                   <div className="w-full h-48 flex items-center justify-center text-4xl" style={{ background: 'var(--lf-bg2)' }}>
                     🍽️
@@ -361,7 +487,7 @@ export function MealPlanView() {
                     ))}
                   </div>
                   <p className="text-[13px] mb-3" style={{ color: 'var(--lf-text-2)' }}>
-                    {recipe.ingredients.length} ingrédients
+                    {recipe.ingredients.length} ingredients
                   </p>
                   {recipe.link && (
                     <a
@@ -380,7 +506,7 @@ export function MealPlanView() {
                       className="flex-1 px-3 py-2 rounded-[var(--lf-radius-sm)] text-[12px] font-semibold lf-transition"
                       style={{ background: 'var(--lf-bg)', border: '1px solid var(--lf-border)', color: 'var(--lf-text-1)' }}
                     >
-                      ✏️ Modifier
+                      Modifier
                     </button>
                     <button
                       onClick={() => togglePin(recipe.id)}
@@ -452,7 +578,7 @@ export function MealPlanView() {
                 className="px-4 py-2 rounded-[var(--lf-radius-sm)] text-[13px] font-semibold lf-transition"
                 style={{ background: 'var(--lf-orange)', color: 'white' }}
               >
-                Générer liste de courses
+                Generer liste de courses
               </button>
             </div>
           </div>
@@ -506,9 +632,8 @@ export function MealPlanView() {
 
                     {/* Meal Slots */}
                     {MEAL_TYPES.map(mealType => (
-                      <>
+                      <div key={`row-${weekIndex}-${mealType}`} className="contents">
                         <div
-                          key={`label-${mealType}`}
                           className="flex items-center text-[13px] font-semibold"
                           style={{ color: 'var(--lf-text-1)' }}
                         >
@@ -540,7 +665,7 @@ export function MealPlanView() {
                                     className="text-[11px] hover:underline"
                                     style={{ color: 'var(--lf-orange)' }}
                                   >
-                                    ✕ Retirer
+                                    x Retirer
                                   </button>
                                 </div>
                               ) : (
@@ -551,7 +676,7 @@ export function MealPlanView() {
                             </div>
                           )
                         })}
-                      </>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -569,15 +694,11 @@ export function MealPlanView() {
               Liste de courses
             </h2>
             <button
-              onClick={() => {
-                if (confirm('Réinitialiser la liste ?')) {
-                  saveShoppingList({})
-                }
-              }}
+              onClick={clearShoppingList}
               className="px-4 py-2 rounded-[var(--lf-radius-sm)] text-[13px] font-semibold lf-transition"
               style={{ background: 'var(--lf-surface)', border: '1px solid var(--lf-border)', color: 'var(--lf-text-1)' }}
             >
-              Réinitialiser
+              Reinitialiser
             </button>
           </div>
 
@@ -610,7 +731,7 @@ export function MealPlanView() {
                   </div>
                   {items.map((item, idx) => (
                     <label
-                      key={idx}
+                      key={item.id}
                       className={`flex items-center gap-3 p-2 mb-1 rounded-[var(--lf-radius-sm)] cursor-pointer hover:bg-lf-bg lf-transition ${
                         item.checked ? 'opacity-50 line-through' : ''
                       }`}
@@ -634,18 +755,15 @@ export function MealPlanView() {
         </div>
       )}
 
-      {/* Recipe Modal - Simple implementation */}
+      {/* Recipe Modal */}
       {recipeModalOpen && (
         <RecipeModal
           recipeId={editingRecipeId}
           recipes={recipes}
+          saving={saving}
           onClose={() => { setRecipeModalOpen(false); setEditingRecipeId(null) }}
-          onSave={(recipe) => {
-            if (editingRecipeId) {
-              saveRecipes(recipes.map(r => r.id === editingRecipeId ? recipe : r))
-            } else {
-              saveRecipes([...recipes, recipe])
-            }
+          onSave={(recipe, isNew) => {
+            saveRecipe(recipe, isNew)
             setRecipeModalOpen(false)
             setEditingRecipeId(null)
           }}
@@ -679,7 +797,7 @@ export function MealPlanView() {
                     {recipe.name}
                   </h4>
                   <p className="text-[13px]" style={{ color: 'var(--lf-text-2)' }}>
-                    {recipe.ingredients.length} ingrédients
+                    {recipe.ingredients.length} ingredients
                   </p>
                 </div>
               ))}
@@ -691,17 +809,19 @@ export function MealPlanView() {
   )
 }
 
-// Simple Recipe Modal Component
+// Recipe Modal Component
 function RecipeModal({
   recipeId,
   recipes,
+  saving,
   onClose,
   onSave
 }: {
   recipeId: string | null
   recipes: Recipe[]
+  saving: boolean
   onClose: () => void
-  onSave: (recipe: Recipe) => void
+  onSave: (recipe: Recipe, isNew: boolean) => void
 }) {
   const editing = recipeId ? recipes.find(r => r.id === recipeId) : null
   const [name, setName] = useState(editing?.name || '')
@@ -726,7 +846,7 @@ function RecipeModal({
       pinned: editing?.pinned || false,
       archived: editing?.archived || false
     }
-    onSave(recipe)
+    onSave(recipe, !recipeId)
   }
 
   return (
@@ -761,13 +881,13 @@ function RecipeModal({
 
           <div>
             <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--lf-text-1)' }}>
-              Tags (séparés par des virgules)
+              Tags (separes par des virgules)
             </label>
             <input
               type="text"
               value={tags}
               onChange={(e) => setTags(e.target.value)}
-              placeholder="végé, rapide, italien"
+              placeholder="vege, rapide, italien"
               className="w-full px-4 py-2 rounded-[var(--lf-radius-sm)] text-[14px] outline-none"
               style={{ background: 'var(--lf-bg)', border: '1px solid var(--lf-border)', color: 'var(--lf-text-1)' }}
             />
@@ -789,7 +909,7 @@ function RecipeModal({
 
           <div>
             <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--lf-text-1)' }}>
-              Lien vidéo/site
+              Lien video/site
             </label>
             <input
               type="url"
@@ -803,7 +923,7 @@ function RecipeModal({
 
           <div>
             <label className="block text-[13px] font-semibold mb-2" style={{ color: 'var(--lf-text-1)' }}>
-              Ingrédients
+              Ingredients
             </label>
             {ingredients.map((ing, idx) => (
               <div key={idx} className="grid grid-cols-2 gap-2 mb-2">
@@ -827,7 +947,7 @@ function RecipeModal({
                     newIng[idx].quantity = e.target.value
                     setIngredients(newIng)
                   }}
-                  placeholder="Quantité"
+                  placeholder="Quantite"
                   className="px-4 py-2 rounded-[var(--lf-radius-sm)] text-[14px] outline-none"
                   style={{ background: 'var(--lf-bg)', border: '1px solid var(--lf-border)', color: 'var(--lf-text-1)' }}
                 />
@@ -839,7 +959,7 @@ function RecipeModal({
               className="text-[13px] font-semibold px-3 py-2 rounded-[var(--lf-radius-sm)] lf-transition"
               style={{ background: 'var(--lf-bg)', border: '1px solid var(--lf-border)', color: 'var(--lf-text-1)' }}
             >
-              + Ajouter un ingrédient
+              + Ajouter un ingredient
             </button>
           </div>
 
@@ -851,8 +971,8 @@ function RecipeModal({
               value={instructions}
               onChange={(e) => setInstructions(e.target.value)}
               rows={5}
-              placeholder="Étapes de préparation..."
-              className="w-full px-4 py-2 rounded-[var(--lf-radius-sm)] text-[14px] outline-none resize-vertical"
+              placeholder="Etapes de preparation..."
+              className="w-full px-4 py-2 rounded-[var(--lf-radius-sm)] text-[14px] outline-none resize-y"
               style={{ background: 'var(--lf-bg)', border: '1px solid var(--lf-border)', color: 'var(--lf-text-1)' }}
             />
           </div>
@@ -860,10 +980,11 @@ function RecipeModal({
           <div className="flex gap-3 pt-4">
             <button
               type="submit"
-              className="flex-1 py-2.5 rounded-[var(--lf-radius-sm)] text-[14px] font-semibold lf-transition"
+              disabled={saving}
+              className="flex-1 py-2.5 rounded-[var(--lf-radius-sm)] text-[14px] font-semibold lf-transition disabled:opacity-50"
               style={{ background: 'var(--lf-text-1)', color: 'var(--lf-surface)' }}
             >
-              Enregistrer
+              {saving ? 'Enregistrement...' : 'Enregistrer'}
             </button>
             <button
               type="button"
