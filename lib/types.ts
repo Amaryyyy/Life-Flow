@@ -22,7 +22,7 @@ export interface Category {
 export type TasksMap = Record<string, Task[]>
 export type ExpandedMap = Record<string, boolean>
 
-export type ViewType = 'tasks' | 'deadlines' | 'calendar'
+export type ViewType = 'tasks' | 'deadlines' | 'calendar' | 'mealplan'
 
 export const DEFAULT_CATEGORIES: Category[] = [
   { id: 'education', name: 'Education', emoji: '\u{1F4DA}', accent: '#5B8BE8', cover: '', pinned: false, master: false },

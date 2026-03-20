@@ -141,7 +141,7 @@ export function GlobalProgress({ percentage }: GlobalProgressProps) {
 
 interface NavTabsProps {
   currentView: string
-  onChangeView: (v: 'tasks' | 'deadlines' | 'calendar') => void
+  onChangeView: (v: 'tasks' | 'deadlines' | 'calendar' | 'mealplan') => void
   deadlineBadge: number
   onExpandAll: () => void
   onCollapseAll: () => void
@@ -164,6 +164,11 @@ export function NavTabs({ currentView, onChangeView, deadlineBadge, onExpandAll,
       id: 'calendar' as const,
       label: 'Calendrier',
       icon: <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>,
+    },
+    {
+      id: 'mealplan' as const,
+      label: 'Meal Plan',
+      icon: <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 002-2V2M7 2v20M21 15V2v0a5 5 0 00-5 5v6c0 1.1.9 2 2 2h3zm0 0v7"/></svg>,
     },
   ]
 

@@ -11,6 +11,7 @@ import { TaskEditModal } from '@/components/lifeflow/task-edit-modal'
 import { ConfirmDeleteModal } from '@/components/lifeflow/confirm-delete-modal'
 import { DeadlinesView, getDeadlineBadgeCount } from '@/components/lifeflow/deadlines-view'
 import { CalendarView } from '@/components/lifeflow/calendar-view'
+import { MealPlanView } from '@/components/lifeflow/meal-plan-view'
 import { Toast } from '@/components/lifeflow/toast'
 import { useConfetti } from '@/hooks/use-confetti'
 import { useToast } from '@/hooks/use-lifeflow-toast'
@@ -362,6 +363,11 @@ export default function LifeFlowApp() {
             onToday={store.calGoToday}
             onJumpToTask={handleJumpToTask}
           />
+        )}
+
+        {/* Meal Plan View */}
+        {store.currentView === 'mealplan' && (
+          <MealPlanView />
         )}
       </main>
 
