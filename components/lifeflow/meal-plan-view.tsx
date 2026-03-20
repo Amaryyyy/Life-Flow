@@ -28,8 +28,8 @@ interface ShoppingList {
   [aisle: string]: Array<{ id: string; name: string; quantity: string; checked: boolean }>
 }
 
-const MEAL_TYPES = ['Petit-dejeuner', 'Dejeuner', 'Gouter', 'Diner', 'Collation']
-const DAYS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
+const MEAL_TYPES = ['Petit-dejeuner', 'Dejeuner', 'Gouter', 'Diner', 'Collation'] as const
+const DAYS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'] as const
 
 // API helper using password from store
 async function mealApi(method: 'GET' | 'POST', body?: Record<string, unknown>, queryParams?: string) {
