@@ -24,6 +24,33 @@ export type ExpandedMap = Record<string, boolean>
 
 export type ViewType = 'tasks' | 'deadlines' | 'calendar' | 'mealplan'
 
+export interface CalendarEvent {
+  id: string
+  title: string
+  date: string
+  endDate: string | null
+  startTime: string | null
+  endTime: string | null
+  color: string
+  description: string
+  location: string
+  allDay: boolean
+  recurrence: string | null
+}
+
+export interface Birthday {
+  id: string
+  name: string
+  date: string // MM-DD format
+  yearOfBirth: number | null
+  notes: string
+}
+
+export const EVENT_COLORS = [
+  '#5B8BE8', '#E05555', '#E8924A', '#E8C84A', '#4BAE82',
+  '#9B7EDE', '#E8629A', '#4BC6B5', '#2A2722', '#A89F96',
+]
+
 export const DEFAULT_CATEGORIES: Category[] = [
   { id: 'education', name: 'Education', emoji: '\u{1F4DA}', accent: '#5B8BE8', cover: '', pinned: false, master: false },
   { id: 'pro', name: 'Professionnel', emoji: '\u{1F4BC}', accent: '#E8924A', cover: '', pinned: false, master: false },
