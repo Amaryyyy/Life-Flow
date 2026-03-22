@@ -47,6 +47,9 @@ export async function GET(req: NextRequest) {
       location: e.location || "",
       allDay: e.all_day !== false,
       recurrence: e.recurrence || null,
+      priority: e.priority || "medium",
+      status: e.status || "pending",
+      tags: (e.tags as string[]) || [],
     }))
 
     const birthdays = (birthdaysRes.data || []).map((b: Record<string, unknown>) => ({
@@ -403,6 +406,9 @@ export async function POST(req: NextRequest) {
           location: event.location || "",
           all_day: event.allDay !== false,
           recurrence: event.recurrence || null,
+          priority: event.priority || "medium",
+          status: event.status || "pending",
+          tags: event.tags || [],
           created_at: Date.now(),
         })
         if (error) throw error
@@ -422,6 +428,9 @@ export async function POST(req: NextRequest) {
         if (data.location !== undefined) updateData.location = data.location
         if (data.allDay !== undefined) updateData.all_day = data.allDay
         if (data.recurrence !== undefined) updateData.recurrence = data.recurrence
+        if (data.priority !== undefined) updateData.priority = data.priority
+        if (data.status !== undefined) updateData.status = data.status
+        if (data.tags !== undefined) updateData.tags = data.tags
 
         const { error } = await supabase
           .from("calendar_events")

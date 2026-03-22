@@ -1,10 +1,10 @@
 "use client"
 
 import { useMemo, useState, useEffect, useCallback } from 'react'
-import { ChevronLeft, ChevronRight, ChevronDown, X, Plus, Cake, MapPin, Clock, Pencil, Trash2, ExternalLink, CalendarDays, CalendarRange, Calendar, List } from 'lucide-react'
-import type { Category, Task, TasksMap, CalendarEvent, Birthday } from '@/lib/types'
+import { ChevronLeft, ChevronRight, ChevronDown, X, Plus, Cake, MapPin, Clock, Pencil, Trash2, ExternalLink, CalendarDays, CalendarRange, Calendar, List, Flag, Play, Pause, RotateCcw, BarChart3, Circle, Check, XCircle, GripVertical } from 'lucide-react'
+import type { Category, Task, TasksMap, CalendarEvent, Birthday, EventPriority, EventStatus } from '@/lib/types'
 import { MONTHS_FR, toDateStr } from '@/lib/helpers'
-import { EVENT_COLORS } from '@/lib/types'
+import { EVENT_COLORS, PRIORITY_CONFIG, STATUS_CONFIG } from '@/lib/types'
 import { useLifeFlowStore } from '@/lib/store'
 
 interface CalendarViewProps {
@@ -442,14 +442,18 @@ export function CalendarView({
   onToday,
   onJumpToTask,
 }: CalendarViewProps) {
-  // View mode: month, week, day, agenda
-  type CalendarViewMode = 'month' | 'week' | 'day' | 'agenda'
+  // View mode: month, week, day, agenda, stats, pomodoro
+  type CalendarViewMode = 'month' | 'week' | 'day' | 'agenda' | 'stats' | 'pomodoro'
   const [viewMode, setViewMode] = useState<CalendarViewMode>('month')
   
   // Calendar events and birthdays state
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [birthdays, setBirthdays] = useState<Birthday[]>([])
   const [loading, setLoading] = useState(true)
+  
+  // Drag and drop state
+  const [draggedEvent, setDraggedEvent] = useState<CalendarEvent | null>(null)
+  const [dropTargetDate, setDropTargetDate] = useState<string | null>(null)
   
   // Day detail modal
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
@@ -653,6 +657,40 @@ export function CalendarView({
     setEditingBirthday(birthday)
     setBirthdayModalOpen(true)
   }, [])
+  
+  // Drag and drop handlers
+  const handleDragStart = useCallback((e: React.DragEvent, event: CalendarEvent) => {
+    e.stopPropagation()
+    setDraggedEvent(event)
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', event.id)
+  }, [])
+  
+  const handleDragOver = useCallback((e: React.DragEvent, dateStr: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDropTargetDate(dateStr)
+  }, [])
+  
+  const handleDragLeave = useCallback(() => {
+    setDropTargetDate(null)
+  }, [])
+  
+  const handleDrop = useCallback(async (e: React.DragEvent, dateStr: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDropTargetDate(null)
+    
+    if (draggedEvent && draggedEvent.date !== dateStr) {
+      await updateEvent(draggedEvent.id, { date: dateStr })
+    }
+    setDraggedEvent(null)
+  }, [draggedEvent, updateEvent])
+  
+  const handleDragEnd = useCallback(() => {
+    setDraggedEvent(null)
+    setDropTargetDate(null)
+  }, [])
 
   if (loading) {
     return (
@@ -681,6 +719,8 @@ export function CalendarView({
                 { mode: 'week' as const, icon: CalendarRange, label: 'Semaine' },
                 { mode: 'day' as const, icon: Calendar, label: 'Jour' },
                 { mode: 'agenda' as const, icon: List, label: 'Agenda' },
+                { mode: 'stats' as const, icon: BarChart3, label: 'Stats' },
+                { mode: 'pomodoro' as const, icon: Clock, label: 'Pomodoro' },
               ]).map(({ mode, icon: Icon, label }) => (
                 <button
                   key={mode}
@@ -708,6 +748,8 @@ export function CalendarView({
               <option value="week">Semaine</option>
               <option value="day">Jour</option>
               <option value="agenda">Agenda</option>
+              <option value="stats">Stats</option>
+              <option value="pomodoro">Pomodoro</option>
             </select>
             <button
               onClick={onToday}
@@ -775,13 +817,20 @@ export function CalendarView({
                 const visibleEvents = eventItems.slice(0, remainingSlots)
                 const extra = totalItems - visibleTasks.length - visibleEvents.length
 
+                const isDropTarget = dropTargetDate === dateStr
+                
                 return (
                   <div
                     key={i}
                     onClick={() => setSelectedDate(cell.date)}
+                    onDragOver={(e) => handleDragOver(e, dateStr)}
+                    onDragLeave={handleDragLeave}
+                    onDrop={(e) => handleDrop(e, dateStr)}
                     className={`border-r border-b border-lf-border min-h-[60px] sm:min-h-[100px] p-1 sm:p-[8px_6px_6px] relative lf-transition cursor-pointer hover:bg-lf-surface2 ${
                       cell.otherMonth ? 'opacity-40' : ''
-                    } ${isToday ? 'bg-lf-bg2' : ''} ${i % 7 === 6 ? '!border-r-0' : ''}`}
+                    } ${isToday ? 'bg-lf-bg2' : ''} ${i % 7 === 6 ? '!border-r-0' : ''} ${
+                      isDropTarget ? 'ring-2 ring-inset ring-lf-text-1/30 bg-lf-surface2' : ''
+                    }`}
                   >
                     {/* Date number + birthday indicator */}
                     <div className="flex items-center gap-0.5 mb-[2px] sm:mb-[5px]">
@@ -801,17 +850,25 @@ export function CalendarView({
                     {totalItems > 0 && (
                       <div className="flex flex-col gap-[1px] sm:gap-[2px]">
                         {/* Events first */}
-                        {visibleEvents.map(event => (
-                          <div
-                            key={event.id}
-                            className="text-[8px] sm:text-[10px] px-1 sm:px-1.5 py-[1px] sm:py-[2px] rounded text-white whitespace-nowrap overflow-hidden text-ellipsis font-medium leading-[1.4]"
-                            style={{ background: event.color }}
-                            title={event.title}
-                          >
-                            <span className="hidden sm:inline">{event.title}</span>
-                            <span className="sm:hidden">{event.title.slice(0, 6)}</span>
-                          </div>
-                        ))}
+{visibleEvents.map(event => (
+                      <div
+                        key={event.id}
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, event)}
+                        onDragEnd={handleDragEnd}
+                        className={`text-[8px] sm:text-[10px] px-1 sm:px-1.5 py-[1px] sm:py-[2px] rounded text-white whitespace-nowrap overflow-hidden text-ellipsis font-medium leading-[1.4] cursor-grab active:cursor-grabbing ${
+                          event.priority === 'high' ? 'ring-1 ring-lf-red/50' : ''
+                        } ${event.status === 'done' ? 'opacity-50 line-through' : ''}`}
+                        style={{ background: event.color }}
+                        title={`${event.title}${event.priority === 'high' ? ' (Haute priorite)' : ''}`}
+                      >
+                        <span className="hidden sm:inline">
+                          {event.priority === 'high' && <Flag size={8} className="inline mr-0.5" />}
+                          {event.title}
+                        </span>
+                        <span className="sm:hidden">{event.title.slice(0, 6)}</span>
+                      </div>
+                    ))}
                         {/* Tasks */}
                         {visibleTasks.map(item => {
                           const isOverdue = !item.task.done && cell.date < today
@@ -879,6 +936,20 @@ export function CalendarView({
             onJumpToTask={onJumpToTask}
             onOpenEvent={openEditEvent}
           />
+        )}
+
+        {/* STATISTICS VIEW */}
+        {viewMode === 'stats' && (
+          <StatisticsPanel
+            events={events}
+            tasks={allTasksWithDates}
+            birthdays={birthdays}
+          />
+        )}
+
+        {/* POMODORO VIEW */}
+        {viewMode === 'pomodoro' && (
+          <PomodoroTimer />
         )}
       </div>
 
@@ -1217,10 +1288,14 @@ function EventModal({ event, defaultDate, onClose, onSave }: EventModalProps) {
   const [description, setDescription] = useState(event?.description || '')
   const [location, setLocation] = useState(event?.location || '')
   const [allDay, setAllDay] = useState(event?.allDay !== false)
+  const [priority, setPriority] = useState<EventPriority>(event?.priority || 'medium')
+  const [status, setStatus] = useState<EventStatus>(event?.status || 'pending')
+  const [tagsInput, setTagsInput] = useState((event?.tags || []).join(', '))
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!title.trim() || !date) return
+    const tags = tagsInput.split(',').map(t => t.trim()).filter(Boolean)
     onSave({
       title: title.trim(),
       date,
@@ -1232,6 +1307,9 @@ function EventModal({ event, defaultDate, onClose, onSave }: EventModalProps) {
       location,
       allDay,
       recurrence: null,
+      priority,
+      status,
+      tags,
     })
   }
 
@@ -1346,6 +1424,58 @@ function EventModal({ event, defaultDate, onClose, onSave }: EventModalProps) {
                 value={location}
                 onChange={e => setLocation(e.target.value)}
                 placeholder="Adresse ou lieu"
+                className="w-full px-3 py-2 rounded-[10px] bg-lf-bg border border-lf-border text-[14px] text-lf-text-1 placeholder:text-lf-text-3 outline-none focus:border-lf-border2 lf-transition"
+              />
+            </div>
+
+            {/* Priority & Status */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[12px] font-medium text-lf-text-2 mb-1.5">Priorite</label>
+                <div className="flex gap-1">
+                  {(['high', 'medium', 'low'] as EventPriority[]).map(p => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setPriority(p)}
+                      className={`flex-1 px-2 py-1.5 rounded-lg text-[11px] font-medium cursor-pointer lf-transition ${
+                        priority === p
+                          ? 'ring-1 ring-offset-1'
+                          : 'opacity-60 hover:opacity-100'
+                      }`}
+                      style={{
+                        background: PRIORITY_CONFIG[p].bg,
+                        color: PRIORITY_CONFIG[p].color,
+                        ...(priority === p ? { '--tw-ring-color': PRIORITY_CONFIG[p].color } as React.CSSProperties : {}),
+                      }}
+                    >
+                      {PRIORITY_CONFIG[p].label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium text-lf-text-2 mb-1.5">Statut</label>
+                <select
+                  value={status}
+                  onChange={e => setStatus(e.target.value as EventStatus)}
+                  className="w-full px-3 py-2 rounded-[10px] bg-lf-bg border border-lf-border text-[13px] text-lf-text-1 outline-none focus:border-lf-border2 lf-transition cursor-pointer"
+                >
+                  {(['pending', 'in_progress', 'done', 'cancelled'] as EventStatus[]).map(s => (
+                    <option key={s} value={s}>{STATUS_CONFIG[s].label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Tags */}
+            <div>
+              <label className="block text-[12px] font-medium text-lf-text-2 mb-1.5">Tags (separes par virgule)</label>
+              <input
+                type="text"
+                value={tagsInput}
+                onChange={e => setTagsInput(e.target.value)}
+                placeholder="travail, urgent, projet"
                 className="w-full px-3 py-2 rounded-[10px] bg-lf-bg border border-lf-border text-[14px] text-lf-text-1 placeholder:text-lf-text-3 outline-none focus:border-lf-border2 lf-transition"
               />
             </div>
@@ -1523,6 +1653,325 @@ function BirthdayModal({ birthday, onClose, onSave }: BirthdayModalProps) {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  )
+}
+
+// ============= STATISTICS PANEL =============
+interface StatisticsPanelProps {
+  events: CalendarEvent[]
+  tasks: CalendarTask[]
+  birthdays: Birthday[]
+}
+
+export function StatisticsPanel({ events, tasks, birthdays }: StatisticsPanelProps) {
+  const stats = useMemo(() => {
+    const now = new Date()
+    const thisMonth = now.getMonth()
+    const thisYear = now.getFullYear()
+    
+    // Events stats
+    const totalEvents = events.length
+    const eventsByStatus = {
+      pending: events.filter(e => e.status === 'pending').length,
+      in_progress: events.filter(e => e.status === 'in_progress').length,
+      done: events.filter(e => e.status === 'done').length,
+      cancelled: events.filter(e => e.status === 'cancelled').length,
+    }
+    const eventsByPriority = {
+      high: events.filter(e => e.priority === 'high').length,
+      medium: events.filter(e => e.priority === 'medium').length,
+      low: events.filter(e => e.priority === 'low').length,
+    }
+    const eventsThisMonth = events.filter(e => {
+      const [y, m] = e.date.split('-').map(Number)
+      return y === thisYear && m - 1 === thisMonth
+    }).length
+    
+    // Tasks stats  
+    const totalTasks = tasks.length
+    const completedTasks = tasks.filter(t => t.task.done).length
+    const pendingTasks = totalTasks - completedTasks
+    const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
+    
+    // Birthdays this month
+    const birthdaysThisMonth = birthdays.filter(b => {
+      const month = parseInt(b.date.split('-')[0], 10)
+      return month - 1 === thisMonth
+    }).length
+    
+    return {
+      totalEvents,
+      eventsByStatus,
+      eventsByPriority,
+      eventsThisMonth,
+      totalTasks,
+      completedTasks,
+      pendingTasks,
+      completionRate,
+      birthdaysThisMonth,
+    }
+  }, [events, tasks, birthdays])
+  
+  return (
+    <div className="p-4 space-y-4">
+      <h3 className="font-serif text-lg text-lf-text-1 flex items-center gap-2">
+        <BarChart3 size={18} />
+        Statistiques
+      </h3>
+      
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="p-3 rounded-xl bg-lf-bg border border-lf-border">
+          <div className="text-2xl font-bold text-lf-text-1">{stats.totalEvents}</div>
+          <div className="text-[11px] text-lf-text-3 uppercase">Evenements</div>
+        </div>
+        <div className="p-3 rounded-xl bg-lf-bg border border-lf-border">
+          <div className="text-2xl font-bold text-lf-text-1">{stats.eventsThisMonth}</div>
+          <div className="text-[11px] text-lf-text-3 uppercase">Ce mois</div>
+        </div>
+        <div className="p-3 rounded-xl bg-lf-bg border border-lf-border">
+          <div className="text-2xl font-bold text-lf-green">{stats.completionRate}%</div>
+          <div className="text-[11px] text-lf-text-3 uppercase">Taches faites</div>
+        </div>
+        <div className="p-3 rounded-xl bg-lf-pink/10 border border-lf-pink/20">
+          <div className="text-2xl font-bold text-lf-pink">{stats.birthdaysThisMonth}</div>
+          <div className="text-[11px] text-lf-text-3 uppercase">Anniversaires</div>
+        </div>
+      </div>
+      
+      {/* Status Breakdown */}
+      <div className="p-4 rounded-xl bg-lf-bg border border-lf-border">
+        <div className="text-[12px] font-semibold text-lf-text-2 mb-3 uppercase">Statut des evenements</div>
+        <div className="space-y-2">
+          {(['pending', 'in_progress', 'done', 'cancelled'] as EventStatus[]).map(s => {
+            const count = stats.eventsByStatus[s]
+            const pct = stats.totalEvents > 0 ? (count / stats.totalEvents) * 100 : 0
+            return (
+              <div key={s} className="flex items-center gap-3">
+                <div className="w-20 text-[12px] text-lf-text-2">{STATUS_CONFIG[s].label}</div>
+                <div className="flex-1 h-2 bg-lf-surface2 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full lf-transition"
+                    style={{ width: `${pct}%`, background: STATUS_CONFIG[s].color }}
+                  />
+                </div>
+                <div className="w-8 text-[11px] text-lf-text-3 text-right">{count}</div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+      
+      {/* Priority Breakdown */}
+      <div className="p-4 rounded-xl bg-lf-bg border border-lf-border">
+        <div className="text-[12px] font-semibold text-lf-text-2 mb-3 uppercase">Priorites</div>
+        <div className="flex gap-4">
+          {(['high', 'medium', 'low'] as EventPriority[]).map(p => (
+            <div key={p} className="flex-1 text-center">
+              <div
+                className="text-xl font-bold"
+                style={{ color: PRIORITY_CONFIG[p].color }}
+              >
+                {stats.eventsByPriority[p]}
+              </div>
+              <div className="text-[10px] text-lf-text-3 uppercase">{PRIORITY_CONFIG[p].label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      
+      {/* Tasks Progress */}
+      <div className="p-4 rounded-xl bg-lf-bg border border-lf-border">
+        <div className="text-[12px] font-semibold text-lf-text-2 mb-3 uppercase">Progression des taches</div>
+        <div className="flex items-center gap-4">
+          <div className="relative w-16 h-16">
+            <svg className="w-16 h-16 -rotate-90">
+              <circle cx="32" cy="32" r="28" fill="none" stroke="var(--lf-surface2)" strokeWidth="6" />
+              <circle
+                cx="32"
+                cy="32"
+                r="28"
+                fill="none"
+                stroke="var(--lf-green)"
+                strokeWidth="6"
+                strokeDasharray={`${stats.completionRate * 1.76} 176`}
+                strokeLinecap="round"
+              />
+            </svg>
+            <div className="absolute inset-0 flex items-center justify-center text-[12px] font-bold text-lf-text-1">
+              {stats.completionRate}%
+            </div>
+          </div>
+          <div className="flex-1 space-y-1">
+            <div className="flex justify-between text-[12px]">
+              <span className="text-lf-text-2">Terminees</span>
+              <span className="text-lf-green font-medium">{stats.completedTasks}</span>
+            </div>
+            <div className="flex justify-between text-[12px]">
+              <span className="text-lf-text-2">En attente</span>
+              <span className="text-lf-text-1 font-medium">{stats.pendingTasks}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============= POMODORO TIMER =============
+interface PomodoroTimerProps {
+  onComplete?: () => void
+}
+
+export function PomodoroTimer({ onComplete }: PomodoroTimerProps) {
+  const [mode, setMode] = useState<'work' | 'break' | 'longBreak'>('work')
+  const [timeLeft, setTimeLeft] = useState(25 * 60) // 25 minutes in seconds
+  const [isRunning, setIsRunning] = useState(false)
+  const [sessions, setSessions] = useState(0)
+  
+  const DURATIONS = {
+    work: 25 * 60,
+    break: 5 * 60,
+    longBreak: 15 * 60,
+  }
+  
+  const MODE_LABELS = {
+    work: 'Travail',
+    break: 'Pause',
+    longBreak: 'Longue pause',
+  }
+  
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null
+    
+    if (isRunning && timeLeft > 0) {
+      interval = setInterval(() => {
+        setTimeLeft(t => t - 1)
+      }, 1000)
+    } else if (timeLeft === 0) {
+      setIsRunning(false)
+      if (mode === 'work') {
+        const newSessions = sessions + 1
+        setSessions(newSessions)
+        onComplete?.()
+        // Every 4 sessions, take a long break
+        if (newSessions % 4 === 0) {
+          setMode('longBreak')
+          setTimeLeft(DURATIONS.longBreak)
+        } else {
+          setMode('break')
+          setTimeLeft(DURATIONS.break)
+        }
+      } else {
+        setMode('work')
+        setTimeLeft(DURATIONS.work)
+      }
+    }
+    
+    return () => {
+      if (interval) clearInterval(interval)
+    }
+  }, [isRunning, timeLeft, mode, sessions, onComplete])
+  
+  const toggleTimer = () => setIsRunning(!isRunning)
+  
+  const resetTimer = () => {
+    setIsRunning(false)
+    setTimeLeft(DURATIONS[mode])
+  }
+  
+  const switchMode = (newMode: typeof mode) => {
+    setMode(newMode)
+    setTimeLeft(DURATIONS[newMode])
+    setIsRunning(false)
+  }
+  
+  const minutes = Math.floor(timeLeft / 60)
+  const seconds = timeLeft % 60
+  const progress = ((DURATIONS[mode] - timeLeft) / DURATIONS[mode]) * 100
+  
+  const modeColor = mode === 'work' ? '#E05555' : '#4BAE82'
+  
+  return (
+    <div className="p-4">
+      <h3 className="font-serif text-lg text-lf-text-1 flex items-center gap-2 mb-4">
+        <Clock size={18} />
+        Pomodoro
+      </h3>
+      
+      {/* Mode Tabs */}
+      <div className="flex bg-lf-bg rounded-lg p-1 mb-6">
+        {(['work', 'break', 'longBreak'] as const).map(m => (
+          <button
+            key={m}
+            onClick={() => switchMode(m)}
+            className={`flex-1 py-2 rounded-md text-[12px] font-medium cursor-pointer lf-transition ${
+              mode === m
+                ? 'bg-lf-surface text-lf-text-1 shadow-sm'
+                : 'text-lf-text-3 hover:text-lf-text-2'
+            }`}
+          >
+            {MODE_LABELS[m]}
+          </button>
+        ))}
+      </div>
+      
+      {/* Timer Display */}
+      <div className="relative w-48 h-48 mx-auto mb-6">
+        <svg className="w-48 h-48 -rotate-90">
+          <circle
+            cx="96"
+            cy="96"
+            r="88"
+            fill="none"
+            stroke="var(--lf-surface2)"
+            strokeWidth="8"
+          />
+          <circle
+            cx="96"
+            cy="96"
+            r="88"
+            fill="none"
+            stroke={modeColor}
+            strokeWidth="8"
+            strokeDasharray={`${progress * 5.53} 553`}
+            strokeLinecap="round"
+            className="lf-transition"
+          />
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <div className="text-4xl font-bold text-lf-text-1 font-mono">
+            {minutes.toString().padStart(2, '0')}:{seconds.toString().padStart(2, '0')}
+          </div>
+          <div className="text-[12px] text-lf-text-3 uppercase mt-1">{MODE_LABELS[mode]}</div>
+        </div>
+      </div>
+      
+      {/* Controls */}
+      <div className="flex items-center justify-center gap-3">
+        <button
+          onClick={resetTimer}
+          className="w-10 h-10 rounded-full border border-lf-border flex items-center justify-center text-lf-text-3 hover:bg-lf-surface2 hover:text-lf-text-1 cursor-pointer lf-transition"
+        >
+          <RotateCcw size={16} />
+        </button>
+        <button
+          onClick={toggleTimer}
+          className="w-14 h-14 rounded-full flex items-center justify-center text-white cursor-pointer hover:opacity-90 lf-transition"
+          style={{ background: modeColor }}
+        >
+          {isRunning ? <Pause size={24} /> : <Play size={24} className="ml-1" />}
+        </button>
+        <div className="w-10 h-10 rounded-full border border-lf-border flex items-center justify-center">
+          <span className="text-[12px] font-bold text-lf-text-2">{sessions}</span>
+        </div>
+      </div>
+      
+      {/* Session info */}
+      <div className="mt-4 text-center text-[11px] text-lf-text-3">
+        {sessions} session{sessions !== 1 ? 's' : ''} completee{sessions !== 1 ? 's' : ''}
       </div>
     </div>
   )
