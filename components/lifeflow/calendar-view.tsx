@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState, useEffect, useCallback } from 'react'
-import { ChevronLeft, ChevronRight, X, Plus, Cake, MapPin, Clock, Pencil, Trash2, ExternalLink } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronDown, X, Plus, Cake, MapPin, Clock, Pencil, Trash2, ExternalLink, CalendarDays, CalendarRange, Calendar, List } from 'lucide-react'
 import type { Category, Task, TasksMap, CalendarEvent, Birthday } from '@/lib/types'
 import { MONTHS_FR, toDateStr } from '@/lib/helpers'
 import { EVENT_COLORS } from '@/lib/types'
@@ -65,6 +65,373 @@ function calculateAge(yearOfBirth: number | null, currentYear: number): number |
   return currentYear - yearOfBirth
 }
 
+// Get the week containing a given date (Monday-Sunday)
+function getWeekDates(year: number, month: number, dayOfMonth: number = 1): Date[] {
+  const date = new Date(year, month, dayOfMonth)
+  const dayOfWeek = date.getDay()
+  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek
+  const monday = new Date(year, month, dayOfMonth + mondayOffset)
+  
+  const week: Date[] = []
+  for (let i = 0; i < 7; i++) {
+    week.push(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i))
+  }
+  return week
+}
+
+// Generate hours for timeline (6am - 11pm)
+const HOURS = Array.from({ length: 18 }, (_, i) => i + 6)
+
+// ============= WEEK VIEW =============
+interface WeekViewProps {
+  today: Date
+  calYear: number
+  calMonth: number
+  taskDayMap: Record<string, CalendarTask[]>
+  eventDayMap: Record<string, CalendarEvent[]>
+  birthdays: Birthday[]
+  onDayClick: (date: Date) => void
+}
+
+function WeekView({ today, calYear, calMonth, taskDayMap, eventDayMap, birthdays, onDayClick }: WeekViewProps) {
+  const weekDates = useMemo(() => getWeekDates(calYear, calMonth, today.getDate()), [calYear, calMonth, today])
+  
+  return (
+    <div className="overflow-x-auto">
+      {/* Day headers */}
+      <div className="grid grid-cols-[60px_repeat(7,1fr)] border-b border-lf-border sticky top-0 bg-lf-surface z-10">
+        <div className="p-2 text-[10px] text-lf-text-3 font-medium" />
+        {weekDates.map((date, i) => {
+          const isToday = date.getTime() === today.getTime()
+          return (
+            <div 
+              key={i} 
+              onClick={() => onDayClick(date)}
+              className={`p-2 text-center border-l border-lf-border cursor-pointer hover:bg-lf-surface2 lf-transition ${isToday ? 'bg-lf-bg2' : ''}`}
+            >
+              <div className="text-[10px] text-lf-text-3 uppercase">{DOW_LABELS[i]}</div>
+              <div className={`text-lg font-semibold mt-0.5 ${isToday ? 'text-lf-text-1' : 'text-lf-text-2'}`}>
+                {date.getDate()}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      
+      {/* Time grid */}
+      <div className="max-h-[500px] overflow-y-auto">
+        {HOURS.map(hour => (
+          <div key={hour} className="grid grid-cols-[60px_repeat(7,1fr)] border-b border-lf-border min-h-[50px]">
+            <div className="p-1 text-[10px] text-lf-text-3 text-right pr-2">{hour}:00</div>
+            {weekDates.map((date, di) => {
+              const dateStr = toDateStr(date)
+              const dayEvents = (eventDayMap[dateStr] || []).filter(e => {
+                if (!e.startTime) return false
+                const eventHour = parseInt(e.startTime.split(':')[0], 10)
+                return eventHour === hour
+              })
+              
+              return (
+                <div 
+                  key={di} 
+                  className="border-l border-lf-border p-0.5 relative"
+                  onClick={() => onDayClick(date)}
+                >
+                  {dayEvents.map(event => (
+                    <div
+                      key={event.id}
+                      className="text-[10px] px-1.5 py-1 rounded text-white font-medium truncate mb-0.5"
+                      style={{ background: event.color }}
+                    >
+                      {event.startTime && <span className="opacity-80 mr-1">{event.startTime}</span>}
+                      {event.title}
+                    </div>
+                  ))}
+                </div>
+              )
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ============= DAY VIEW =============
+interface DayViewProps {
+  today: Date
+  calYear: number
+  calMonth: number
+  taskDayMap: Record<string, CalendarTask[]>
+  eventDayMap: Record<string, CalendarEvent[]>
+  birthdays: Birthday[]
+  onOpenEvent: (event: CalendarEvent) => void
+}
+
+function DayView({ today, calYear, calMonth, taskDayMap, eventDayMap, birthdays, onOpenEvent }: DayViewProps) {
+  const [selectedDay, setSelectedDay] = useState(() => {
+    const t = new Date()
+    return new Date(calYear, calMonth, t.getMonth() === calMonth && t.getFullYear() === calYear ? t.getDate() : 1)
+  })
+  
+  const dateStr = toDateStr(selectedDay)
+  const dayTasks = taskDayMap[dateStr] || []
+  const dayEvents = eventDayMap[dateStr] || []
+  const dayBirthdays = birthdays.filter(b => birthdayMatchesDate(b, selectedDay))
+  const isToday = selectedDay.getTime() === today.getTime()
+  
+  const prevDay = () => setSelectedDay(d => new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1))
+  const nextDay = () => setSelectedDay(d => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1))
+  
+  return (
+    <div className="p-4">
+      {/* Day selector */}
+      <div className="flex items-center justify-center gap-4 mb-4">
+        <button onClick={prevDay} className="w-8 h-8 rounded-lg border border-lf-border flex items-center justify-center text-lf-text-2 hover:bg-lf-surface2 cursor-pointer">
+          <ChevronLeft size={16} />
+        </button>
+        <div className="text-center">
+          <div className="text-[11px] text-lf-text-3 uppercase">{DOW_LABELS[(selectedDay.getDay() + 6) % 7]}</div>
+          <div className={`text-2xl font-semibold ${isToday ? 'text-lf-text-1' : 'text-lf-text-2'}`}>
+            {selectedDay.getDate()} {MONTHS_FR[selectedDay.getMonth()]}
+          </div>
+        </div>
+        <button onClick={nextDay} className="w-8 h-8 rounded-lg border border-lf-border flex items-center justify-center text-lf-text-2 hover:bg-lf-surface2 cursor-pointer">
+          <ChevronRight size={16} />
+        </button>
+      </div>
+      
+      {/* Birthdays */}
+      {dayBirthdays.length > 0 && (
+        <div className="mb-4 p-3 rounded-xl bg-lf-pink/5 border border-lf-pink/20">
+          <div className="flex items-center gap-2 text-lf-pink text-[13px] font-medium mb-2">
+            <Cake size={14} />
+            Anniversaires
+          </div>
+          {dayBirthdays.map(b => (
+            <div key={b.id} className="text-[13px] text-lf-text-1">{b.name}</div>
+          ))}
+        </div>
+      )}
+      
+      {/* Timeline */}
+      <div className="space-y-1 max-h-[400px] overflow-y-auto">
+        {HOURS.map(hour => {
+          const hourEvents = dayEvents.filter(e => {
+            if (!e.startTime) return hour === 6
+            const eventHour = parseInt(e.startTime.split(':')[0], 10)
+            return eventHour === hour
+          })
+          
+          return (
+            <div key={hour} className="flex gap-3 min-h-[40px]">
+              <div className="w-12 text-right text-[11px] text-lf-text-3 pt-1 flex-shrink-0">
+                {hour}:00
+              </div>
+              <div className="flex-1 border-t border-lf-border pt-1">
+                {hourEvents.map(event => (
+                  <div
+                    key={event.id}
+                    onClick={() => onOpenEvent(event)}
+                    className="text-[12px] px-2 py-1.5 rounded-lg text-white font-medium mb-1 cursor-pointer hover:opacity-90 lf-transition"
+                    style={{ background: event.color }}
+                  >
+                    <div className="flex items-center gap-2">
+                      {event.startTime && <span className="opacity-80">{event.startTime}</span>}
+                      <span>{event.title}</span>
+                    </div>
+                    {event.location && (
+                      <div className="text-[10px] opacity-80 flex items-center gap-1 mt-0.5">
+                        <MapPin size={10} />
+                        {event.location}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      
+      {/* Tasks for the day */}
+      {dayTasks.length > 0 && (
+        <div className="mt-4 pt-4 border-t border-lf-border">
+          <div className="text-[12px] font-semibold text-lf-text-2 mb-2 uppercase">Taches</div>
+          <div className="space-y-1">
+            {dayTasks.map(({ task, cat }) => (
+              <div 
+                key={task.id}
+                className={`text-[13px] px-3 py-2 rounded-lg border border-lf-border flex items-center gap-2 ${task.done ? 'opacity-50 line-through' : ''}`}
+              >
+                <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: cat.accent }} />
+                <span className="text-lf-text-2">{cat.emoji}</span>
+                <span className="text-lf-text-1">{task.title}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ============= AGENDA VIEW =============
+interface AgendaViewProps {
+  allTasksWithDates: CalendarTask[]
+  events: CalendarEvent[]
+  birthdays: Birthday[]
+  today: Date
+  onJumpToTask: (catId: string, taskId: string) => void
+  onOpenEvent: (event: CalendarEvent) => void
+}
+
+function AgendaView({ allTasksWithDates, events, birthdays, today, onJumpToTask, onOpenEvent }: AgendaViewProps) {
+  // Combine and sort upcoming items
+  const upcomingItems = useMemo(() => {
+    const items: Array<{
+      type: 'task' | 'event' | 'birthday'
+      date: Date
+      data: CalendarTask | CalendarEvent | Birthday
+    }> = []
+    
+    const todayTime = today.getTime()
+    
+    // Add tasks
+    allTasksWithDates.forEach(t => {
+      const [y, m, d] = t.dateStr.split('-').map(Number)
+      const date = new Date(y, m - 1, d)
+      if (date.getTime() >= todayTime - 86400000 * 7) { // Include last 7 days
+        items.push({ type: 'task', date, data: t })
+      }
+    })
+    
+    // Add events
+    events.forEach(e => {
+      const [y, m, d] = e.date.split('-').map(Number)
+      const date = new Date(y, m - 1, d)
+      if (date.getTime() >= todayTime - 86400000 * 7) {
+        items.push({ type: 'event', date, data: e })
+      }
+    })
+    
+    // Add birthdays for current year
+    birthdays.forEach(b => {
+      const [month, day] = b.date.split('-').map(Number)
+      const date = new Date(today.getFullYear(), month - 1, day)
+      if (date.getTime() >= todayTime - 86400000 * 7) {
+        items.push({ type: 'birthday', date, data: b })
+      }
+    })
+    
+    // Sort by date
+    items.sort((a, b) => a.date.getTime() - b.date.getTime())
+    
+    return items
+  }, [allTasksWithDates, events, birthdays, today])
+  
+  // Group by date
+  const groupedItems = useMemo(() => {
+    const groups: Record<string, typeof upcomingItems> = {}
+    upcomingItems.forEach(item => {
+      const key = toDateStr(item.date)
+      if (!groups[key]) groups[key] = []
+      groups[key].push(item)
+    })
+    return groups
+  }, [upcomingItems])
+  
+  const groupKeys = Object.keys(groupedItems).sort()
+  
+  return (
+    <div className="p-4 max-h-[600px] overflow-y-auto">
+      {groupKeys.length === 0 ? (
+        <p className="text-center text-lf-text-3 py-8">Aucun evenement a venir</p>
+      ) : (
+        <div className="space-y-4">
+          {groupKeys.map(dateKey => {
+            const [y, m, d] = dateKey.split('-').map(Number)
+            const date = new Date(y, m - 1, d)
+            const isToday = date.getTime() === today.getTime()
+            const isPast = date.getTime() < today.getTime()
+            const items = groupedItems[dateKey]
+            
+            return (
+              <div key={dateKey}>
+                <div className={`text-[12px] font-semibold uppercase tracking-wide mb-2 ${
+                  isToday ? 'text-lf-text-1' : isPast ? 'text-lf-text-3' : 'text-lf-text-2'
+                }`}>
+                  {isToday ? "Aujourd'hui" : `${DOW_LABELS[(date.getDay() + 6) % 7]} ${d} ${MONTHS_FR[m - 1]}`}
+                </div>
+                <div className="space-y-1.5">
+                  {items.map((item, i) => {
+                    if (item.type === 'task') {
+                      const { task, cat } = item.data as CalendarTask
+                      return (
+                        <div
+                          key={`task-${task.id}`}
+                          onClick={() => onJumpToTask(cat.id, task.id)}
+                          className={`flex items-center gap-2 px-3 py-2 rounded-lg border border-lf-border hover:border-lf-border2 cursor-pointer lf-transition ${
+                            task.done ? 'opacity-50' : ''
+                          }`}
+                        >
+                          <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: cat.accent }} />
+                          <span className="text-[12px] text-lf-text-2">{cat.emoji}</span>
+                          <span className={`text-[13px] text-lf-text-1 flex-1 ${task.done ? 'line-through' : ''}`}>
+                            {task.title}
+                          </span>
+                        </div>
+                      )
+                    }
+                    
+                    if (item.type === 'event') {
+                      const event = item.data as CalendarEvent
+                      return (
+                        <div
+                          key={`event-${event.id}`}
+                          onClick={() => onOpenEvent(event)}
+                          className="flex items-center gap-2 px-3 py-2 rounded-lg text-white cursor-pointer hover:opacity-90 lf-transition"
+                          style={{ background: event.color }}
+                        >
+                          {event.startTime && (
+                            <span className="text-[11px] opacity-80">{event.startTime}</span>
+                          )}
+                          <span className="text-[13px] font-medium">{event.title}</span>
+                          {event.location && (
+                            <span className="text-[11px] opacity-70 flex items-center gap-1 ml-auto">
+                              <MapPin size={10} />
+                              {event.location}
+                            </span>
+                          )}
+                        </div>
+                      )
+                    }
+                    
+                    if (item.type === 'birthday') {
+                      const birthday = item.data as Birthday
+                      return (
+                        <div
+                          key={`bday-${birthday.id}`}
+                          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-lf-pink/10 border border-lf-pink/20"
+                        >
+                          <Cake size={14} className="text-lf-pink" />
+                          <span className="text-[13px] text-lf-text-1">{birthday.name}</span>
+                        </div>
+                      )
+                    }
+                    
+                    return null
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function CalendarView({
   categories,
   tasks,
@@ -75,6 +442,10 @@ export function CalendarView({
   onToday,
   onJumpToTask,
 }: CalendarViewProps) {
+  // View mode: month, week, day, agenda
+  type CalendarViewMode = 'month' | 'week' | 'day' | 'agenda'
+  const [viewMode, setViewMode] = useState<CalendarViewMode>('month')
+  
   // Calendar events and birthdays state
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [birthdays, setBirthdays] = useState<Birthday[]>([])
@@ -82,6 +453,22 @@ export function CalendarView({
   
   // Day detail modal
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
+  
+  // Birthdays section collapsed state (persisted in sessionStorage)
+  const [birthdaysCollapsed, setBirthdaysCollapsed] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('lf-birthdays-collapsed') === 'true'
+    }
+    return false
+  })
+  
+  const toggleBirthdaysCollapsed = useCallback(() => {
+    setBirthdaysCollapsed(prev => {
+      const next = !prev
+      sessionStorage.setItem('lf-birthdays-collapsed', String(next))
+      return next
+    })
+  }, [])
   
   // Event/Birthday form modal
   const [eventModalOpen, setEventModalOpen] = useState(false)
@@ -283,10 +670,45 @@ export function CalendarView({
       >
         {/* Header */}
         <div className="flex items-center justify-between px-3 sm:px-[22px] py-3 sm:py-[18px] border-b border-lf-border gap-2 flex-wrap">
-          <span className="font-serif text-lg sm:text-[1.3rem] font-normal tracking-tight text-lf-text-1">
-            {MONTHS_FR[calMonth]} {calYear}
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="font-serif text-lg sm:text-[1.3rem] font-normal tracking-tight text-lf-text-1">
+              {MONTHS_FR[calMonth]} {calYear}
+            </span>
+            {/* View Mode Switcher */}
+            <div className="hidden sm:flex items-center bg-lf-bg rounded-lg p-0.5 gap-0.5">
+              {([
+                { mode: 'month' as const, icon: CalendarDays, label: 'Mois' },
+                { mode: 'week' as const, icon: CalendarRange, label: 'Semaine' },
+                { mode: 'day' as const, icon: Calendar, label: 'Jour' },
+                { mode: 'agenda' as const, icon: List, label: 'Agenda' },
+              ]).map(({ mode, icon: Icon, label }) => (
+                <button
+                  key={mode}
+                  onClick={() => setViewMode(mode)}
+                  className={`px-2.5 py-1.5 rounded-md text-[11px] font-medium flex items-center gap-1.5 cursor-pointer lf-transition ${
+                    viewMode === mode
+                      ? 'bg-lf-surface text-lf-text-1 shadow-sm'
+                      : 'text-lf-text-3 hover:text-lf-text-2'
+                  }`}
+                >
+                  <Icon size={12} />
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Mobile View Switcher */}
+            <select
+              value={viewMode}
+              onChange={(e) => setViewMode(e.target.value as typeof viewMode)}
+              className="sm:hidden px-2 py-1.5 rounded-lg border border-lf-border bg-lf-surface text-[11px] font-medium text-lf-text-1 cursor-pointer"
+            >
+              <option value="month">Mois</option>
+              <option value="week">Semaine</option>
+              <option value="day">Jour</option>
+              <option value="agenda">Agenda</option>
+            </select>
             <button
               onClick={onToday}
               className="px-2.5 sm:px-3.5 py-[5px] rounded-full border-[1.5px] border-lf-border bg-transparent cursor-pointer font-sans text-[11px] sm:text-[12px] font-medium text-lf-text-2 hover:bg-lf-surface2 hover:text-lf-text-1 lf-transition"
@@ -325,162 +747,221 @@ export function CalendarView({
           ))}
         </div>
 
-        {/* Day headers */}
-        <div className="grid grid-cols-7 border-b border-lf-border">
-          {DOW_LABELS.map((d, i) => (
-            <div key={d} className="text-center py-2 sm:py-2.5 px-1 text-[10px] sm:text-[11px] font-semibold text-lf-text-3 uppercase tracking-wide">
-              <span className="hidden sm:inline">{d}</span>
-              <span className="sm:hidden">{DOW_LABELS_SHORT[i]}</span>
-            </div>
-          ))}
-        </div>
-
-        {/* Grid */}
-        <div className="grid grid-cols-7">
-          {cells.map((cell, i) => {
-            const dateStr = toDateStr(cell.date)
-            const isToday = cell.date.getTime() === today.getTime()
-            const taskItems = taskDayMap[dateStr] || []
-            const eventItems = eventDayMap[dateStr] || []
-            const birthdayItems = birthdays.filter(b => birthdayMatchesDate(b, cell.date))
-            const totalItems = taskItems.length + eventItems.length + birthdayItems.length
-            const MAX_VISIBLE = 2
-            const visibleTasks = taskItems.slice(0, MAX_VISIBLE)
-            const remainingSlots = MAX_VISIBLE - visibleTasks.length
-            const visibleEvents = eventItems.slice(0, remainingSlots)
-            const extra = totalItems - visibleTasks.length - visibleEvents.length
-
-            return (
-              <div
-                key={i}
-                onClick={() => setSelectedDate(cell.date)}
-                className={`border-r border-b border-lf-border min-h-[60px] sm:min-h-[100px] p-1 sm:p-[8px_6px_6px] relative lf-transition cursor-pointer hover:bg-lf-surface2 ${
-                  cell.otherMonth ? 'opacity-40' : ''
-                } ${isToday ? 'bg-lf-bg2' : ''} ${i % 7 === 6 ? '!border-r-0' : ''}`}
-              >
-                {/* Date number + birthday indicator */}
-                <div className="flex items-center gap-0.5 mb-[2px] sm:mb-[5px]">
-                  <div
-                    className={`text-[11px] sm:text-[12px] font-semibold text-lf-text-2 w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center ${
-                      isToday ? 'bg-lf-text-1 text-lf-surface rounded-full' : ''
-                    }`}
-                  >
-                    {cell.date.getDate()}
-                  </div>
-                  {birthdayItems.length > 0 && (
-                    <Cake size={10} className="text-lf-pink flex-shrink-0" />
-                  )}
+        {/* MONTH VIEW */}
+        {viewMode === 'month' && (
+          <>
+            {/* Day headers */}
+            <div className="grid grid-cols-7 border-b border-lf-border">
+              {DOW_LABELS.map((d, i) => (
+                <div key={d} className="text-center py-2 sm:py-2.5 px-1 text-[10px] sm:text-[11px] font-semibold text-lf-text-3 uppercase tracking-wide">
+                  <span className="hidden sm:inline">{d}</span>
+                  <span className="sm:hidden">{DOW_LABELS_SHORT[i]}</span>
                 </div>
+              ))}
+            </div>
 
-                {/* Items preview */}
-                {totalItems > 0 && (
-                  <div className="flex flex-col gap-[1px] sm:gap-[2px]">
-                    {/* Events first */}
-                    {visibleEvents.map(event => (
-                      <div
-                        key={event.id}
-                        className="text-[8px] sm:text-[10px] px-1 sm:px-1.5 py-[1px] sm:py-[2px] rounded text-white whitespace-nowrap overflow-hidden text-ellipsis font-medium leading-[1.4]"
-                        style={{ background: event.color }}
-                        title={event.title}
-                      >
-                        <span className="hidden sm:inline">{event.title}</span>
-                        <span className="sm:hidden">{event.title.slice(0, 6)}</span>
-                      </div>
-                    ))}
-                    {/* Tasks */}
-                    {visibleTasks.map(item => {
-                      const isOverdue = !item.task.done && cell.date < today
-                      return (
-                        <div
-                          key={item.task.id}
-                          className={`text-[8px] sm:text-[10px] px-1 sm:px-1.5 py-[1px] sm:py-[2px] rounded text-white whitespace-nowrap overflow-hidden text-ellipsis font-medium leading-[1.4] ${
-                            item.task.done ? 'opacity-45 line-through' : ''
-                          } ${isOverdue ? 'ring-1 ring-lf-red' : ''}`}
-                          style={{ background: item.cat.accent || '#5B8BE8' }}
-                          title={`${item.cat.name}: ${item.task.title}`}
-                        >
-                          <span className="hidden sm:inline">{item.cat.emoji} {item.task.title}</span>
-                          <span className="sm:hidden">{item.task.title.slice(0, 6)}</span>
-                        </div>
-                      )
-                    })}
-                    {extra > 0 && (
-                      <div className="text-[8px] sm:text-[10px] text-lf-text-3 font-medium px-0.5 sm:px-1">
-                        +{extra}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      </div>
+            {/* Grid */}
+            <div className="grid grid-cols-7">
+              {cells.map((cell, i) => {
+                const dateStr = toDateStr(cell.date)
+                const isToday = cell.date.getTime() === today.getTime()
+                const taskItems = taskDayMap[dateStr] || []
+                const eventItems = eventDayMap[dateStr] || []
+                const birthdayItems = birthdays.filter(b => birthdayMatchesDate(b, cell.date))
+                const totalItems = taskItems.length + eventItems.length + birthdayItems.length
+                const MAX_VISIBLE = 2
+                const visibleTasks = taskItems.slice(0, MAX_VISIBLE)
+                const remainingSlots = MAX_VISIBLE - visibleTasks.length
+                const visibleEvents = eventItems.slice(0, remainingSlots)
+                const extra = totalItems - visibleTasks.length - visibleEvents.length
 
-      {/* Birthdays Section */}
-      <div
-        className="mt-4 bg-lf-surface border-[1.5px] border-lf-border rounded-[18px] overflow-hidden"
-        style={{ boxShadow: 'var(--lf-shadow-sm)' }}
-      >
-        <div className="flex items-center justify-between px-3 sm:px-[22px] py-3 sm:py-4 border-b border-lf-border">
-          <div className="flex items-center gap-2">
-            <Cake size={16} className="text-lf-pink" />
-            <span className="font-serif text-base sm:text-lg font-normal text-lf-text-1">Anniversaires</span>
-          </div>
-          <button
-            onClick={openAddBirthday}
-            className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-lf-text-1 text-lf-surface flex items-center justify-center cursor-pointer hover:opacity-80 lf-transition"
-          >
-            <Plus size={14} />
-          </button>
-        </div>
-        <div className="p-3 sm:p-4">
-          {birthdays.length === 0 ? (
-            <p className="text-[13px] text-lf-text-3 text-center py-4">Aucun anniversaire enregistre</p>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
-              {birthdays.map(b => {
-                const [month, day] = b.date.split('-').map(Number)
-                const monthName = MONTHS_FR[month - 1]
-                const age = calculateAge(b.yearOfBirth, calYear)
-                
                 return (
                   <div
-                    key={b.id}
-                    className="flex items-center justify-between p-2.5 sm:p-3 rounded-[12px] bg-lf-bg border border-lf-border hover:border-lf-border2 lf-transition group"
+                    key={i}
+                    onClick={() => setSelectedDate(cell.date)}
+                    className={`border-r border-b border-lf-border min-h-[60px] sm:min-h-[100px] p-1 sm:p-[8px_6px_6px] relative lf-transition cursor-pointer hover:bg-lf-surface2 ${
+                      cell.otherMonth ? 'opacity-40' : ''
+                    } ${isToday ? 'bg-lf-bg2' : ''} ${i % 7 === 6 ? '!border-r-0' : ''}`}
                   >
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-lf-pink/10 flex items-center justify-center">
-                        <Cake size={16} className="text-lf-pink" />
-                      </div>
-                      <div>
-                        <div className="text-[13px] sm:text-[14px] font-medium text-lf-text-1">{b.name}</div>
-                        <div className="text-[11px] sm:text-[12px] text-lf-text-3">
-                          {day} {monthName}
-                          {age !== null && <span className="ml-1.5">({age} ans)</span>}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 lf-transition">
-                      <button
-                        onClick={() => openEditBirthday(b)}
-                        className="w-7 h-7 rounded-md flex items-center justify-center text-lf-text-3 hover:bg-lf-surface2 hover:text-lf-text-1 lf-transition cursor-pointer"
+                    {/* Date number + birthday indicator */}
+                    <div className="flex items-center gap-0.5 mb-[2px] sm:mb-[5px]">
+                      <div
+                        className={`text-[11px] sm:text-[12px] font-semibold text-lf-text-2 w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center ${
+                          isToday ? 'bg-lf-text-1 text-lf-surface rounded-full' : ''
+                        }`}
                       >
-                        <Pencil size={12} />
-                      </button>
-                      <button
-                        onClick={() => deleteBirthday(b.id)}
-                        className="w-7 h-7 rounded-md flex items-center justify-center text-lf-text-3 hover:bg-lf-red/10 hover:text-lf-red lf-transition cursor-pointer"
-                      >
-                        <Trash2 size={12} />
-                      </button>
+                        {cell.date.getDate()}
+                      </div>
+                      {birthdayItems.length > 0 && (
+                        <Cake size={10} className="text-lf-pink flex-shrink-0" />
+                      )}
                     </div>
+
+                    {/* Items preview */}
+                    {totalItems > 0 && (
+                      <div className="flex flex-col gap-[1px] sm:gap-[2px]">
+                        {/* Events first */}
+                        {visibleEvents.map(event => (
+                          <div
+                            key={event.id}
+                            className="text-[8px] sm:text-[10px] px-1 sm:px-1.5 py-[1px] sm:py-[2px] rounded text-white whitespace-nowrap overflow-hidden text-ellipsis font-medium leading-[1.4]"
+                            style={{ background: event.color }}
+                            title={event.title}
+                          >
+                            <span className="hidden sm:inline">{event.title}</span>
+                            <span className="sm:hidden">{event.title.slice(0, 6)}</span>
+                          </div>
+                        ))}
+                        {/* Tasks */}
+                        {visibleTasks.map(item => {
+                          const isOverdue = !item.task.done && cell.date < today
+                          return (
+                            <div
+                              key={item.task.id}
+                              className={`text-[8px] sm:text-[10px] px-1 sm:px-1.5 py-[1px] sm:py-[2px] rounded text-white whitespace-nowrap overflow-hidden text-ellipsis font-medium leading-[1.4] ${
+                                item.task.done ? 'opacity-45 line-through' : ''
+                              } ${isOverdue ? 'ring-1 ring-lf-red' : ''}`}
+                              style={{ background: item.cat.accent || '#5B8BE8' }}
+                              title={`${item.cat.name}: ${item.task.title}`}
+                            >
+                              <span className="hidden sm:inline">{item.cat.emoji} {item.task.title}</span>
+                              <span className="sm:hidden">{item.task.title.slice(0, 6)}</span>
+                            </div>
+                          )
+                        })}
+                        {extra > 0 && (
+                          <div className="text-[8px] sm:text-[10px] text-lf-text-3 font-medium px-0.5 sm:px-1">
+                            +{extra}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )
               })}
             </div>
-          )}
+          </>
+        )}
+
+        {/* WEEK VIEW */}
+        {viewMode === 'week' && (
+          <WeekView
+            today={today}
+            calYear={calYear}
+            calMonth={calMonth}
+            taskDayMap={taskDayMap}
+            eventDayMap={eventDayMap}
+            birthdays={birthdays}
+            onDayClick={setSelectedDate}
+          />
+        )}
+
+        {/* DAY VIEW */}
+        {viewMode === 'day' && (
+          <DayView
+            today={today}
+            calYear={calYear}
+            calMonth={calMonth}
+            taskDayMap={taskDayMap}
+            eventDayMap={eventDayMap}
+            birthdays={birthdays}
+            onOpenEvent={openEditEvent}
+          />
+        )}
+
+        {/* AGENDA VIEW */}
+        {viewMode === 'agenda' && (
+          <AgendaView
+            allTasksWithDates={allTasksWithDates}
+            events={events}
+            birthdays={birthdays}
+            today={today}
+            onJumpToTask={onJumpToTask}
+            onOpenEvent={openEditEvent}
+          />
+        )}
+      </div>
+
+      {/* Birthdays Section - Collapsible */}
+      <div
+        className="mt-4 bg-lf-surface border-[1.5px] border-lf-border rounded-[18px] overflow-hidden"
+        style={{ boxShadow: 'var(--lf-shadow-sm)' }}
+      >
+        <div 
+          className={`flex items-center justify-between px-3 sm:px-[22px] py-3 sm:py-4 cursor-pointer hover:bg-lf-surface2 lf-transition ${birthdaysCollapsed ? '' : 'border-b border-lf-border'}`}
+          onClick={toggleBirthdaysCollapsed}
+        >
+          <div className="flex items-center gap-2">
+            <Cake size={16} className="text-lf-pink" />
+            <span className="font-serif text-base sm:text-lg font-normal text-lf-text-1">Anniversaires</span>
+            {birthdays.length > 0 && (
+              <span className="text-[11px] font-medium px-1.5 py-0.5 rounded-full bg-lf-pink/10 text-lf-pink">
+                {birthdays.length}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={(e) => { e.stopPropagation(); openAddBirthday(); }}
+              className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-lf-text-1 text-lf-surface flex items-center justify-center cursor-pointer hover:opacity-80 lf-transition"
+            >
+              <Plus size={14} />
+            </button>
+            <ChevronDown 
+              size={18} 
+              className={`text-lf-text-3 lf-transition ${birthdaysCollapsed ? '-rotate-90' : ''}`} 
+            />
+          </div>
         </div>
+        {!birthdaysCollapsed && (
+          <div className="p-3 sm:p-4">
+            {birthdays.length === 0 ? (
+              <p className="text-[13px] text-lf-text-3 text-center py-4">Aucun anniversaire enregistre</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
+                {birthdays.map(b => {
+                  const [month, day] = b.date.split('-').map(Number)
+                  const monthName = MONTHS_FR[month - 1]
+                  const age = calculateAge(b.yearOfBirth, calYear)
+                  
+                  return (
+                    <div
+                      key={b.id}
+                      className="flex items-center justify-between p-2.5 sm:p-3 rounded-[12px] bg-lf-bg border border-lf-border hover:border-lf-border2 lf-transition group"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-lf-pink/10 flex items-center justify-center">
+                          <Cake size={16} className="text-lf-pink" />
+                        </div>
+                        <div>
+                          <div className="text-[13px] sm:text-[14px] font-medium text-lf-text-1">{b.name}</div>
+                          <div className="text-[11px] sm:text-[12px] text-lf-text-3">
+                            {day} {monthName}
+                            {age !== null && <span className="ml-1.5">({age} ans)</span>}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 lf-transition">
+                        <button
+                          onClick={() => openEditBirthday(b)}
+                          className="w-7 h-7 rounded-md flex items-center justify-center text-lf-text-3 hover:bg-lf-surface2 hover:text-lf-text-1 lf-transition cursor-pointer"
+                        >
+                          <Pencil size={12} />
+                        </button>
+                        <button
+                          onClick={() => deleteBirthday(b.id)}
+                          className="w-7 h-7 rounded-md flex items-center justify-center text-lf-text-3 hover:bg-lf-red/10 hover:text-lf-red lf-transition cursor-pointer"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Day Detail Modal */}
