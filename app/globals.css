@@ -20,6 +20,8 @@
   --lf-orange-bg: #FEF4EB;
   --lf-green: #4BAE82;
   --lf-green-bg: #EDF8F3;
+  --lf-pink: #E8629A;
+  --lf-pink-bg: #FDF0F5;
   --lf-shadow-sm: 0 1px 3px rgba(38,35,30,.06), 0 1px 2px rgba(38,35,30,.04);
   --lf-shadow-md: 0 4px 14px rgba(38,35,30,.08), 0 2px 4px rgba(38,35,30,.04);
   --lf-shadow-lg: 0 16px 40px rgba(38,35,30,.12), 0 4px 10px rgba(38,35,30,.06);
@@ -76,6 +78,7 @@
   --lf-red-bg: rgba(224,85,85,.12);
   --lf-orange-bg: rgba(232,146,74,.12);
   --lf-green-bg: rgba(75,174,130,.12);
+  --lf-pink-bg: rgba(232,98,154,.12);
   --lf-shadow-sm: 0 1px 3px rgba(0,0,0,.3);
   --lf-shadow-md: 0 4px 14px rgba(0,0,0,.4);
   --lf-shadow-lg: 0 16px 40px rgba(0,0,0,.5);
@@ -160,6 +163,8 @@
   --color-lf-red-bg: var(--lf-red-bg);
   --color-lf-orange-bg: var(--lf-orange-bg);
   --color-lf-green-bg: var(--lf-green-bg);
+  --color-lf-pink: var(--lf-pink);
+  --color-lf-pink-bg: var(--lf-pink-bg);
   --color-lf-text-1: var(--lf-text-1);
   --color-lf-text-2: var(--lf-text-2);
   --color-lf-text-3: var(--lf-text-3);

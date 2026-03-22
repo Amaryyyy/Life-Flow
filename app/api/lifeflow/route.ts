@@ -25,6 +25,44 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url)
   const dataType = url.searchParams.get("type") || "tasks"
 
+  // Calendar data request (events + birthdays)
+  if (dataType === "calendar") {
+    const [eventsRes, birthdaysRes] = await Promise.all([
+      supabase.from("calendar_events").select("*").order("date", { ascending: true }),
+      supabase.from("birthdays").select("*").order("date", { ascending: true }),
+    ])
+
+    if (eventsRes.error) return NextResponse.json({ error: eventsRes.error.message }, { status: 500 })
+    if (birthdaysRes.error) return NextResponse.json({ error: birthdaysRes.error.message }, { status: 500 })
+
+    const events = (eventsRes.data || []).map((e: Record<string, unknown>) => ({
+      id: e.id,
+      title: e.title,
+      date: e.date,
+      endDate: e.end_date || null,
+      startTime: e.start_time || null,
+      endTime: e.end_time || null,
+      color: e.color || "#5B8BE8",
+      description: e.description || "",
+      location: e.location || "",
+      allDay: e.all_day !== false,
+      recurrence: e.recurrence || null,
+      priority: e.priority || "medium",
+      status: e.status || "pending",
+      tags: (e.tags as string[]) || [],
+    }))
+
+    const birthdays = (birthdaysRes.data || []).map((b: Record<string, unknown>) => ({
+      id: b.id,
+      name: b.name,
+      date: b.date,
+      yearOfBirth: b.year_of_birth || null,
+      notes: b.notes || "",
+    }))
+
+    return NextResponse.json({ events, birthdays })
+  }
+
   // Meal plan data request
   if (dataType === "mealplan") {
     const [recipesRes, mealPlansRes, shoppingRes] = await Promise.all([
@@ -349,6 +387,106 @@ export async function POST(req: NextRequest) {
           .from("shopping_items")
           .delete()
           .neq("id", "")
+        if (error) throw error
+        return NextResponse.json({ success: true })
+      }
+
+      // --- Calendar Events ---
+      case "addCalendarEvent": {
+        const { event } = body
+        const { error } = await supabase.from("calendar_events").insert({
+          id: event.id,
+          title: event.title,
+          date: event.date,
+          end_date: event.endDate || null,
+          start_time: event.startTime || null,
+          end_time: event.endTime || null,
+          color: event.color || "#5B8BE8",
+          description: event.description || "",
+          location: event.location || "",
+          all_day: event.allDay !== false,
+          recurrence: event.recurrence || null,
+          priority: event.priority || "medium",
+          status: event.status || "pending",
+          tags: event.tags || [],
+          created_at: Date.now(),
+        })
+        if (error) throw error
+        return NextResponse.json({ success: true })
+      }
+
+      case "updateCalendarEvent": {
+        const { eventId, data } = body
+        const updateData: Record<string, unknown> = {}
+        if (data.title !== undefined) updateData.title = data.title
+        if (data.date !== undefined) updateData.date = data.date
+        if (data.endDate !== undefined) updateData.end_date = data.endDate
+        if (data.startTime !== undefined) updateData.start_time = data.startTime
+        if (data.endTime !== undefined) updateData.end_time = data.endTime
+        if (data.color !== undefined) updateData.color = data.color
+        if (data.description !== undefined) updateData.description = data.description
+        if (data.location !== undefined) updateData.location = data.location
+        if (data.allDay !== undefined) updateData.all_day = data.allDay
+        if (data.recurrence !== undefined) updateData.recurrence = data.recurrence
+        if (data.priority !== undefined) updateData.priority = data.priority
+        if (data.status !== undefined) updateData.status = data.status
+        if (data.tags !== undefined) updateData.tags = data.tags
+
+        const { error } = await supabase
+          .from("calendar_events")
+          .update(updateData)
+          .eq("id", eventId)
+        if (error) throw error
+        return NextResponse.json({ success: true })
+      }
+
+      case "deleteCalendarEvent": {
+        const { eventId } = body
+        const { error } = await supabase
+          .from("calendar_events")
+          .delete()
+          .eq("id", eventId)
+        if (error) throw error
+        return NextResponse.json({ success: true })
+      }
+
+      // --- Birthdays ---
+      case "addBirthday": {
+        const { birthday } = body
+        const { error } = await supabase.from("birthdays").insert({
+          id: birthday.id,
+          name: birthday.name,
+          date: birthday.date,
+          year_of_birth: birthday.yearOfBirth || null,
+          notes: birthday.notes || "",
+          created_at: Date.now(),
+        })
+        if (error) throw error
+        return NextResponse.json({ success: true })
+      }
+
+      case "updateBirthday": {
+        const { birthdayId, data } = body
+        const updateData: Record<string, unknown> = {}
+        if (data.name !== undefined) updateData.name = data.name
+        if (data.date !== undefined) updateData.date = data.date
+        if (data.yearOfBirth !== undefined) updateData.year_of_birth = data.yearOfBirth
+        if (data.notes !== undefined) updateData.notes = data.notes
+
+        const { error } = await supabase
+          .from("birthdays")
+          .update(updateData)
+          .eq("id", birthdayId)
+        if (error) throw error
+        return NextResponse.json({ success: true })
+      }
+
+      case "deleteBirthday": {
+        const { birthdayId } = body
+        const { error } = await supabase
+          .from("birthdays")
+          .delete()
+          .eq("id", birthdayId)
         if (error) throw error
         return NextResponse.json({ success: true })
       }
