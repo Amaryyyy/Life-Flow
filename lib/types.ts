@@ -24,6 +24,9 @@ export type ExpandedMap = Record<string, boolean>
 
 export type ViewType = 'tasks' | 'deadlines' | 'calendar' | 'mealplan'
 
+export type EventPriority = 'high' | 'medium' | 'low'
+export type EventStatus = 'pending' | 'in_progress' | 'done' | 'cancelled'
+
 export interface CalendarEvent {
   id: string
   title: string
@@ -36,6 +39,22 @@ export interface CalendarEvent {
   location: string
   allDay: boolean
   recurrence: string | null
+  priority: EventPriority
+  status: EventStatus
+  tags: string[]
+}
+
+export const PRIORITY_CONFIG: Record<EventPriority, { label: string; color: string; bg: string }> = {
+  high: { label: 'Haute', color: '#E05555', bg: 'rgba(224,85,85,0.1)' },
+  medium: { label: 'Moyenne', color: '#E8924A', bg: 'rgba(232,146,74,0.1)' },
+  low: { label: 'Basse', color: '#A89F96', bg: 'rgba(168,159,150,0.1)' },
+}
+
+export const STATUS_CONFIG: Record<EventStatus, { label: string; color: string; icon: string }> = {
+  pending: { label: 'A faire', color: '#5B8BE8', icon: 'circle' },
+  in_progress: { label: 'En cours', color: '#E8924A', icon: 'play' },
+  done: { label: 'Termine', color: '#4BAE82', icon: 'check' },
+  cancelled: { label: 'Annule', color: '#A89F96', icon: 'x' },
 }
 
 export interface Birthday {
